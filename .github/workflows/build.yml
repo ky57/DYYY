@@ -1,26 +1,25 @@
-name: WeChat_LiquidGlass
+name: build deb
 
 on:
   push:
-    branches:
-      - main
+    branches-ignore:
+      - dev
   pull_request:
-    branches:
-      - main
+    branches-ignore:
+      - dev
 
 jobs:
   build:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v4.2.2
         with:
           submodules: true
 
       - name: Check cache
         run: |
-          echo upstream_heads=$(git ls-remote https://github.com/roothide/theos | head -n 1 | cut -f 1) git ls-remote https://github.com
+          echo upstream_heads=`git ls-remote https://github.com/roothide/theos | head -n 1 | cut -f 1`-`git ls-remote https://github.com/theos/sdks | head -n 1 | cut -f 1` >> $GITHUB_ENV
 
       - name: Use cache
         id: cache
@@ -42,11 +41,9 @@ jobs:
           make package FINALPACKAGE=1 -j$(sysctl -n hw.ncpu)
           make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1 -j$(sysctl -n hw.ncpu)
           make package THEOS_PACKAGE_SCHEME=roothide FINALPACKAGE=1 -j$(sysctl -n hw.ncpu)
-          ls -la ${{ github.workspace }}  # Debug: List files in workspace
-          ls -la ${{ github.workspace }}/packages  # Debug: List files in packages directory
 
       - name: Upload specific Deb packages
         uses: actions/upload-artifact@v4.6.0
         with:
-          name: WeChat_LiquidGlass
-          path: ${{ github.workspace }}/packages/*.deb  # Adjust this path based on debug output
+          name: DYYY
+          path: ${{ github.workspace }}/packages/*.deb
