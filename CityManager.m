@@ -5,14 +5,14 @@
 @implementation CityManager
 
 + (instancetype)sharedInstance {
-    static CityManager *sharedInstance = nil;
+    static CityManager *instance = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
       instance = [[CityManager alloc] init];
       [instance loadCityData];
       [instance loadCountryData];
     });
-    return sharedInstance;
+    return instance;
 }
 
 - (void)loadCityData {
@@ -493,9 +493,8 @@
     return self.cityCodeMap[code];
 }
 
-// 完善 getCityNameWithCode 方法，增强兼容性
-- (NSString *)getCityNameWithCode:(NSString *)cityCode {
-    if (!cityCode || cityCode.length < 2) {
+- (NSString *)getProvinceNameWithCode:(NSString *)code {
+    if (!code || code.length < 6) {
         return nil;
     }
     NSString *provinceCode = [code substringToIndex:2];
