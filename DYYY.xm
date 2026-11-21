@@ -180,9 +180,19 @@
             
             if (settingVC) {
                 BOOL isIPad = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad;
+                // iOS 15.1：手机端使用 PageSheet + 系统 detents/grabber；iPad 全屏
                 if (@available(iOS 15.0, *)) {
                     if (!isIPad) {
                         settingVC.modalPresentationStyle = UIModalPresentationPageSheet;
+                        UISheetPresentationController *sheet = settingVC.sheetPresentationController;
+                        if (sheet) {
+                            sheet.detents = @[
+                                [UISheetPresentationControllerDetent mediumDetent],
+                                [UISheetPresentationControllerDetent largeDetent]
+                            ];
+                            sheet.prefersGrabberVisible = YES;
+                            sheet.preferredCornerRadius = 16.0;
+                        }
                     } else {
                         settingVC.modalPresentationStyle = UIModalPresentationFullScreen;
                     }
@@ -197,9 +207,10 @@
                     
                     [settingVC.view addSubview:closeButton];
                     
+                    UILayoutGuide *safeGuide = settingVC.view.safeAreaLayoutGuide;
                     [NSLayoutConstraint activateConstraints:@[
-                        [closeButton.trailingAnchor constraintEqualToAnchor:settingVC.view.trailingAnchor constant:-10],
-                        [closeButton.topAnchor constraintEqualToAnchor:settingVC.view.topAnchor constant:40],
+                        [closeButton.trailingAnchor constraintEqualToAnchor:safeGuide.trailingAnchor constant:-10],
+                        [closeButton.topAnchor constraintEqualToAnchor:safeGuide.topAnchor constant:8],
                         [closeButton.widthAnchor constraintEqualToConstant:80],
                         [closeButton.heightAnchor constraintEqualToConstant:40]
                     ]];
@@ -207,18 +218,26 @@
                     [closeButton addTarget:self action:@selector(closeSettings:) forControlEvents:UIControlEventTouchUpInside];
                 }
                 
-                UIView *handleBar = [[UIView alloc] init];
-                handleBar.backgroundColor = [UIColor whiteColor];
-                handleBar.layer.cornerRadius = 2.5;
-                handleBar.translatesAutoresizingMaskIntoConstraints = NO;
-                [settingVC.view addSubview:handleBar];
-                
-                [NSLayoutConstraint activateConstraints:@[
-                    [handleBar.centerXAnchor constraintEqualToAnchor:settingVC.view.centerXAnchor],
-                    [handleBar.topAnchor constraintEqualToAnchor:settingVC.view.topAnchor constant:8],
-                    [handleBar.widthAnchor constraintEqualToConstant:40],
-                    [handleBar.heightAnchor constraintEqualToConstant:5]
-                ]];
+                // PageSheet 已启用系统 grabber 时不再画自定义把手，避免 iOS 15.1 双把手
+                BOOL usingSystemGrabber = NO;
+                if (@available(iOS 15.0, *)) {
+                    usingSystemGrabber = (settingVC.modalPresentationStyle == UIModalPresentationPageSheet
+                                          && settingVC.sheetPresentationController.prefersGrabberVisible);
+                }
+                if (!usingSystemGrabber) {
+                    UIView *handleBar = [[UIView alloc] init];
+                    handleBar.backgroundColor = [UIColor whiteColor];
+                    handleBar.layer.cornerRadius = 2.5;
+                    handleBar.translatesAutoresizingMaskIntoConstraints = NO;
+                    [settingVC.view addSubview:handleBar];
+                    
+                    [NSLayoutConstraint activateConstraints:@[
+                        [handleBar.centerXAnchor constraintEqualToAnchor:settingVC.view.centerXAnchor],
+                        [handleBar.topAnchor constraintEqualToAnchor:settingVC.view.safeAreaLayoutGuide.topAnchor constant:8],
+                        [handleBar.widthAnchor constraintEqualToConstant:40],
+                        [handleBar.heightAnchor constraintEqualToConstant:5]
+                    ]];
+                }
                 
                 [rootViewController presentViewController:settingVC animated:YES completion:nil];
             }

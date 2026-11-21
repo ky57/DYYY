@@ -6,8 +6,14 @@
 #  Created on: 2024/10/04
 #
 
-TARGET = iphone:clang:latest:15.0
+TARGET = iphone:clang:latest:15.1
 ARCHS = arm64 arm64e
+
+# 在 GitHub Actions 中运行时的特殊配置
+ifeq ($(GITHUB_ACTIONS),true)
+    export INSTALL = 0
+    export FINALPACKAGE = 1
+endif
 
 export DEBUG = 0
 INSTALL_TARGET_PROCESSES = Aweme
@@ -18,6 +24,8 @@ TWEAK_NAME = DYYY
 
 DYYY_FILES = DYYY.xm DYYYSettingViewController.m CityManager.m DYYYManager.m
 DYYY_CFLAGS = -fobjc-arc -w
+# 统一 runtime 与最低系统版本，避免混编警告
+DYYY_CFLAGS += -fobjc-runtime=ios-15.1
 CXXFLAGS += -std=c++11
 CCFLAGS += -std=c++11
 DYYY_LOGOS_DEFAULT_GENERATOR = internal
