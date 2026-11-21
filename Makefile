@@ -8,7 +8,7 @@
 # 本地配置文件（可选）
 -include Makefile.local
 
-TARGET = iphone:clang:latest:14.0
+TARGET = iphone:clang:latest:15.1
 ARCHS = arm64 arm64e
 
 #export THEOS=/Users/huami/theos
@@ -23,7 +23,7 @@ else
     unexport THEOS_PACKAGE_SCHEME
 endif
 
-# 在GitHub Actions中运行时的特殊配置
+# 在 GitHub Actions 中运行时的特殊配置
 ifeq ($(GITHUB_ACTIONS),true)
     export INSTALL = 0
     export FINALPACKAGE = 1
@@ -40,6 +40,8 @@ DYYY_FILES = DYYY.xm DYYYFloatClearButton.xm DYYYFloatSpeedButton.m DYYYSettings
 DYYY_CFLAGS = -fobjc-arc -w
 DYYY_LDFLAGS = -weak_framework AVFAudio
 DYYY_FRAMEWORKS = CoreAudio
+# 统一 runtime 与最低系统版本，避免混编警告
+DYYY_CFLAGS += -fobjc-runtime=ios-15.1
 CXXFLAGS += -std=c++11
 CCFLAGS += -std=c++11
 DYYY_LOGOS_DEFAULT_GENERATOR = internal
