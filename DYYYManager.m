@@ -117,7 +117,7 @@
 }
 
 - (void)show {
-    UIWindow *window = [UIApplication sharedApplication].keyWindow;
+    UIWindow *window = [DYYYManager getActiveWindow];
     if (!window) return;
     
     [window addSubview:self];
@@ -197,21 +197,51 @@
 }
 
 + (UIWindow *)getActiveWindow {
-    if (@available(iOS 15.0, *)) {
+    // 兼容 iOS 15.1 及多 Scene / 过渡态窗口（合入上游旧版 iOS 窗口获取优化）
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    UIWindow *fallbackWindow = [UIApplication sharedApplication].keyWindow
+        ?: [UIApplication sharedApplication].delegate.window
+        ?: [UIApplication sharedApplication].windows.firstObject;
+#pragma clang diagnostic pop
+
+    if (@available(iOS 13.0, *)) {
+        UIWindowScene *activeScene = nil;
+        UIWindowScene *inactiveScene = nil;
         for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-            if ([scene isKindOfClass:[UIWindowScene class]] && scene.activationState == UISceneActivationStateForegroundActive) {
-                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-                    if (w.isKeyWindow) return w;
-                }
+            if (![scene isKindOfClass:[UIWindowScene class]]) {
+                continue;
+            }
+            UISceneActivationState state = scene.activationState;
+            if (state == UISceneActivationStateForegroundActive) {
+                activeScene = (UIWindowScene *)scene;
+                break;
+            }
+            if (state == UISceneActivationStateForegroundInactive && inactiveScene == nil) {
+                inactiveScene = (UIWindowScene *)scene;
             }
         }
-        return nil;
-    } else {
-        #pragma clang diagnostic push
-        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        return [UIApplication sharedApplication].windows.firstObject;
-        #pragma clang diagnostic pop
+
+        UIWindowScene *targetScene = activeScene ?: inactiveScene;
+        if (targetScene) {
+            if (@available(iOS 15.0, *)) {
+                return targetScene.keyWindow ?: targetScene.windows.firstObject ?: fallbackWindow;
+            }
+
+            UIWindow *firstVisibleWindow = nil;
+            for (UIWindow *window in targetScene.windows) {
+                if (window.isKeyWindow) {
+                    return window;
+                }
+                if (firstVisibleWindow == nil && !window.isHidden && window.rootViewController) {
+                    firstVisibleWindow = window;
+                }
+            }
+            return firstVisibleWindow ?: targetScene.windows.firstObject ?: fallbackWindow;
+        }
     }
+
+    return fallbackWindow;
 }
 
 + (UIViewController *)getActiveTopController {
@@ -283,13 +313,52 @@
     }
 }
 
++ (BOOL)isPhotoLibraryAccessGranted:(PHAuthorizationStatus)status {
+    if (status == PHAuthorizationStatusAuthorized) {
+        return YES;
+    }
+    if (@available(iOS 14.0, *)) {
+        return status == PHAuthorizationStatusLimited;
+    }
+    return NO;
+}
+
++ (void)requestPhotoLibraryAccess:(void (^)(BOOL granted))completion {
+    if (!completion) {
+        return;
+    }
+    if (@available(iOS 14.0, *)) {
+        PHAuthorizationStatus current = [PHPhotoLibrary authorizationStatusForAccessLevel:PHAccessLevelAddOnly];
+        if (current != PHAuthorizationStatusNotDetermined) {
+            completion([self isPhotoLibraryAccessGranted:current]);
+            return;
+        }
+        [PHPhotoLibrary requestAuthorizationForAccessLevel:PHAccessLevelAddOnly handler:^(PHAuthorizationStatus status) {
+            completion([self isPhotoLibraryAccessGranted:status]);
+        }];
+        return;
+    }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    PHAuthorizationStatus current = [PHPhotoLibrary authorizationStatus];
+    if (current != PHAuthorizationStatusNotDetermined) {
+        completion([self isPhotoLibraryAccessGranted:current]);
+        return;
+    }
+    [PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus status) {
+        completion([self isPhotoLibraryAccessGranted:status]);
+    }];
+#pragma clang diagnostic pop
+}
+
 + (void)saveMedia:(NSURL *)mediaURL mediaType:(MediaType)mediaType completion:(void (^)(void))completion {
     if (mediaType == MediaTypeAudio) {
         return;
     }
 
-    [PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus status) {
-        if (status == PHAuthorizationStatusAuthorized) {
+    [self requestPhotoLibraryAccess:^(BOOL granted) {
+        if (granted) {
             // 如果是HEIC类型，先转换为GIF
             if (mediaType == MediaTypeHeic) {
                 [self convertHeicToGif:mediaURL completion:^(NSURL *gifURL, BOOL success) {
@@ -355,6 +424,13 @@
                     }
                     [[NSFileManager defaultManager] removeItemAtPath:mediaURL.path error:nil];
                 }];
+            }
+        } else {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self showToast:@"未获得相册权限"];
+            });
+            if (completion) {
+                completion();
             }
         }
     }];
@@ -676,8 +752,13 @@
                     [activityVC setCompletionWithItemsHandler:^(UIActivityType _Nullable activityType, BOOL completed, NSArray * _Nullable returnedItems, NSError * _Nullable error) {
                         [[NSFileManager defaultManager] removeItemAtURL:fileURL error:nil];
                     }];
-                    UIViewController *rootVC = [UIApplication sharedApplication].keyWindow.rootViewController;
-                    [rootVC presentViewController:activityVC animated:YES completion:nil];
+                    UIViewController *rootVC = [DYYYManager getActiveTopController];
+                    if (!rootVC) {
+                        rootVC = [DYYYManager getActiveWindow].rootViewController;
+                    }
+                    if (rootVC) {
+                        [rootVC presentViewController:activityVC animated:YES completion:nil];
+                    }
                 });
             } else {
                 [self saveMedia:fileURL mediaType:mediaType completion:completion];
@@ -1154,38 +1235,48 @@
 
 //MARK: 以下都是创建保存实况的调用方法
 - (void)saveLivePhoto:(NSString *)imageSourcePath videoUrl:(NSString *)videoSourcePath {
-    NSURL *photoURL = [NSURL fileURLWithPath:imageSourcePath];
-    NSURL *videoURL = [NSURL fileURLWithPath:videoSourcePath];
-    BOOL available = [PHAssetCreationRequest supportsAssetResourceTypes:@[@(PHAssetResourceTypePhoto), @(PHAssetResourceTypePairedVideo)]];
-    if (!available) {
-        return;
-    }
-    [PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus status) {
-        if (status != PHAuthorizationStatusAuthorized) {
+    // 实况照片保存能力从 iOS 15 起可用；本项目最低系统为 15.1
+    if (@available(iOS 15.0, *)) {
+        NSURL *photoURL = [NSURL fileURLWithPath:imageSourcePath];
+        NSURL *videoURL = [NSURL fileURLWithPath:videoSourcePath];
+        BOOL available = [PHAssetCreationRequest supportsAssetResourceTypes:@[@(PHAssetResourceTypePhoto), @(PHAssetResourceTypePairedVideo)]];
+        if (!available) {
             return;
         }
-        NSString *identifier = [NSUUID UUID].UUIDString;
-        [self useAssetWriter:photoURL video:videoURL identifier:identifier complete:^(BOOL success, NSString *photoFile, NSString *videoFile, NSError *error) {
-            NSURL *photo = [NSURL fileURLWithPath:photoFile];
-            NSURL *video = [NSURL fileURLWithPath:videoFile];
-            [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
-                PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
-                [request addResourceWithType:PHAssetResourceTypePhoto fileURL:photo options:nil];
-                [request addResourceWithType:PHAssetResourceTypePairedVideo fileURL:video options:nil];
-            } completionHandler:^(BOOL success, NSError * _Nullable error) {
+        [DYYYManager requestPhotoLibraryAccess:^(BOOL granted) {
+            if (!granted) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    if (success) {
-                        [DYYYManager showToast:@"保存实况成功"];
-                        // 删除临时文件
-                        [[NSFileManager defaultManager] removeItemAtPath:imageSourcePath error:nil];
-                        [[NSFileManager defaultManager] removeItemAtPath:videoSourcePath error:nil];
-                        [[NSFileManager defaultManager] removeItemAtPath:photoFile error:nil];
-                        [[NSFileManager defaultManager] removeItemAtPath:videoFile error:nil];
-                    } 
+                    [DYYYManager showToast:@"未获得相册权限"];
                 });
+                return;
+            }
+            NSString *identifier = [NSUUID UUID].UUIDString;
+            [self useAssetWriter:photoURL video:videoURL identifier:identifier complete:^(BOOL success, NSString *photoFile, NSString *videoFile, NSError *error) {
+                NSURL *photo = [NSURL fileURLWithPath:photoFile];
+                NSURL *video = [NSURL fileURLWithPath:videoFile];
+                [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+                    PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
+                    [request addResourceWithType:PHAssetResourceTypePhoto fileURL:photo options:nil];
+                    [request addResourceWithType:PHAssetResourceTypePairedVideo fileURL:video options:nil];
+                } completionHandler:^(BOOL success, NSError * _Nullable error) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if (success) {
+                            [DYYYManager showToast:@"保存实况成功"];
+                            // 删除临时文件
+                            [[NSFileManager defaultManager] removeItemAtPath:imageSourcePath error:nil];
+                            [[NSFileManager defaultManager] removeItemAtPath:videoSourcePath error:nil];
+                            [[NSFileManager defaultManager] removeItemAtPath:photoFile error:nil];
+                            [[NSFileManager defaultManager] removeItemAtPath:videoFile error:nil];
+                        }
+                    });
+                }];
             }];
         }];
-    }];
+    } else {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [DYYYManager showToast:@"当前 iOS 版本不支持实况照片，将分别保存图片和视频"];
+        });
+    }
 }
 - (void)useAssetWriter:(NSURL *)photoURL video:(NSURL *)videoURL identifier:(NSString *)identifier complete:(void (^)(BOOL success, NSString *photoFile, NSString *videoFile, NSError *error))complete {
     NSString *photoName = [photoURL lastPathComponent];

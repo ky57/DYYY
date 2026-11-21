@@ -109,7 +109,11 @@ typedef NS_ENUM(NSInteger, DYYYSettingItemType) {
     self.tableView.backgroundColor = [UIColor clearColor];
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.contentInset = UIEdgeInsetsMake(20, 0, 0, 0);
-    self.tableView.sectionHeaderTopPadding = 0;
+    // sectionHeaderTopPadding 为 iOS 15+ API，最低系统 15.1 可直接使用
+    if (@available(iOS 15.0, *)) {
+        self.tableView.sectionHeaderTopPadding = 0;
+    }
+    self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.tableView];
 }
 
